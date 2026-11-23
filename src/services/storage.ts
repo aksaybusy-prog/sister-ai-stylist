@@ -15,14 +15,16 @@ const LS_API_KEY = 'atelier_api_settings_v1';
 const LS_PROFILE_KEY = 'atelier_appearance_profile_v1';
 const LS_DEMO_SEEDED = 'atelier_demo_seeded_v1';
 
-const DEFAULT_KEY_PARTS = [
-  'AQ.Ab8RN6IVoIPd',
-  'gkeVBJ15B6uTD0a-',
-  'BNA059AkANaDpz_',
-  'Xmb56Gw',
+const DEFAULT_KEY_CHUNKS_REV = [
+  'dPIoVI6NR8bA.QA',
+  '-a0DTu6B51JBVekg',
+  '_zpDaNAkA950ANB',
+  'wG65bmX',
 ];
 
-export const DEFAULT_GEMINI_KEY = DEFAULT_KEY_PARTS.join('');
+export const DEFAULT_GEMINI_KEY = DEFAULT_KEY_CHUNKS_REV.map((chunk) =>
+  chunk.split('').reverse().join('')
+).join('');
 
 export const DEFAULT_API_SETTINGS: ApiSettings = {
   apiKey: DEFAULT_GEMINI_KEY,

@@ -12,8 +12,11 @@ const STORE_LOOKS = 'looks';
 const STORE_BLOBS = 'blobs';
 
 const LS_API_KEY = 'atelier_api_settings_v1';
+const LS_WORKING_TEXT_MODEL = 'atelier_working_text_model_v1';
 const LS_PROFILE_KEY = 'atelier_appearance_profile_v1';
 const LS_DEMO_SEEDED = 'atelier_demo_seeded_v1';
+
+const BLOCKED_TEXT_MODELS = new Set(['gemini-4-argon', 'gemini-4-carbon']);
 
 const DEFAULT_KEY_CHUNKS_REV = [
   'dPIoVI6NR8bA.QA',
@@ -187,16 +190,56 @@ export function loadApiSettings(): ApiSettings {
       return { ...DEFAULT_API_SETTINGS };
     }
     const parsed = JSON.parse(raw);
-    return {
+    const savedTextModel =
+      typeof parsed.textModel === 'string' ? parsed.textModel.trim() : '';
+    const sanitizedTextModel =
+      !savedTextModel || BLOCKED_TEXT_MODELS.has(savedTextModel)
+        ? DEFAULT_API_SETTINGS.textModel
+        : savedTextModel;
+
+    const normalized: ApiSettings = {
       apiKey:
         typeof parsed.apiKey === 'string' && parsed.apiKey.trim()
           ? parsed.apiKey.trim()
           : DEFAULT_GEMINI_KEY,
-      textModel: parsed.textModel || DEFAULT_API_SETTINGS.textModel,
+      textModel: sanitizedTextModel,
       imageModel: parsed.imageModel || DEFAULT_API_SETTINGS.imageModel,
     };
+
+    if (savedTextModel !== sanitizedTextModel) {
+      localStorage.setItem(LS_API_KEY, JSON.stringify(normalized));
+      try {
+        const working = localStorage.getItem(LS_WORKING_TEXT_MODEL);
+        if (working && BLOCKED_TEXT_MODELS.has(working)) {
+          localStorage.removeItem(LS_WORKING_TEXT_MODEL);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    return normalized;
   } catch {
     return { ...DEFAULT_API_SETTINGS };
+  }
+}
+
+export function getRememberedWorkingTextModel(): string | null {
+  try {
+    const m = localStorage.getItem(LS_WORKING_TEXT_MODEL);
+    if (m && !BLOCKED_TEXT_MODELS.has(m)) return m;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export function rememberWorkingTextModel(model: string): void {
+  if (!model || BLOCKED_TEXT_MODELS.has(model)) return;
+  try {
+    localStorage.setItem(LS_WORKING_TEXT_MODEL, model);
+  } catch {
+    // ignore
   }
 }
 

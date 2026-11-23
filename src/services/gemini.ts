@@ -12,6 +12,31 @@ import type {
 } from '../types';
 import { SEASONS, WARDROBE_CATEGORIES } from '../types';
 import { dataUrlToInlineImage } from './imageUtils';
+import {
+  getRememberedWorkingTextModel,
+  rememberWorkingTextModel,
+} from './storage';
+
+const SMART_TEXT_FALLBACK_ORDER = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-4-hydrogen',
+];
+
+const BLOCKED_TEXT_MODELS = new Set(['gemini-4-argon', 'gemini-4-carbon']);
+
+function getTextModelQueue(preferredModel?: string): string[] {
+  const remembered = getRememberedWorkingTextModel();
+  const candidates = [
+    preferredModel && !BLOCKED_TEXT_MODELS.has(preferredModel)
+      ? preferredModel
+      : null,
+    remembered,
+    ...SMART_TEXT_FALLBACK_ORDER,
+  ].filter((m): m is string => Boolean(m) && !BLOCKED_TEXT_MODELS.has(m!));
+  return Array.from(new Set(candidates));
+}
 
 function getClient(settings: ApiSettings): GoogleGenAI {
   const key = settings.apiKey.trim();
@@ -23,22 +48,29 @@ function getClient(settings: ApiSettings): GoogleGenAI {
   return new GoogleGenAI({ apiKey: key, apiVersion: 'v1beta' });
 }
 
-function isTransientCapacityError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
+function isFallbackableError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
   return (
     msg.includes('503') ||
     msg.includes('429') ||
-    msg.includes('UNAVAILABLE') ||
+    msg.includes('404') ||
+    msg.includes('unavailable') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('not_found') ||
+    msg.includes('not found') ||
     msg.includes('high demand') ||
     msg.includes('overloaded') ||
-    msg.includes('capacity')
+    msg.includes('capacity') ||
+    msg.includes('rate limit') ||
+    msg.includes('quota')
   );
 }
 
 async function createInteractionWithFallback(
   ai: GoogleGenAI,
   models: string[],
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  onSuccessModel?: (model: string) => void
 ): Promise<{
   output_text?: string | null;
   output_image?: { data?: string | null; mime_type?: string | null } | null;
@@ -52,13 +84,14 @@ async function createInteractionWithFallback(
         model,
         stream: false,
       } as Parameters<GoogleGenAI['interactions']['create']>[0]);
+      onSuccessModel?.(model);
       return res as {
         output_text?: string | null;
         output_image?: { data?: string | null; mime_type?: string | null } | null;
       };
     } catch (err) {
       lastErr = err;
-      if (!isTransientCapacityError(err)) {
+      if (!isFallbackableError(err)) {
         throw err;
       }
     }
@@ -135,11 +168,7 @@ export async function analyzeClothingPhoto(
 
   const interaction = await createInteractionWithFallback(
     ai,
-    [
-      settings.textModel || 'gemini-4-hydrogen',
-      'gemini-3.5-flash-lite',
-      'gemini-4-argon',
-    ],
+    getTextModelQueue(settings.textModel),
     {
       store: false,
       input: [
@@ -158,7 +187,8 @@ export async function analyzeClothingPhoto(
         mime_type: 'application/json',
         schema,
       },
-    }
+    },
+    rememberWorkingTextModel
   );
 
   const parsed = parseJsonSafe<AnalyzedClothingItem>(interaction.output_text);
@@ -307,11 +337,7 @@ ${JSON.stringify(wardrobeCatalog, null, 2)}
 
   const interaction = await createInteractionWithFallback(
     ai,
-    [
-      settings.textModel || 'gemini-4-hydrogen',
-      'gemini-3.5-flash-lite',
-      'gemini-4-argon',
-    ],
+    getTextModelQueue(settings.textModel),
     {
       store: false,
       input: inputParts,
@@ -320,7 +346,8 @@ ${JSON.stringify(wardrobeCatalog, null, 2)}
         mime_type: 'application/json',
         schema,
       },
-    }
+    },
+    rememberWorkingTextModel
   );
 
   const raw = parseJsonSafe<{
@@ -518,11 +545,7 @@ export async function analyzeWardrobeGaps(params: {
 
   const interaction = await createInteractionWithFallback(
     ai,
-    [
-      settings.textModel || 'gemini-4-hydrogen',
-      'gemini-3.5-flash-lite',
-      'gemini-4-argon',
-    ],
+    getTextModelQueue(settings.textModel),
     {
       store: false,
       input: `Ты — опытный капсульный стилист Vogue. Проанализируй текущий гардероб девушки и порекомендуй РОВНО 3 базовые вещи, которых сильнее всего не хватает для создания множества новых стильных образов.
@@ -537,7 +560,8 @@ ${JSON.stringify(catalog, null, 2)}
         mime_type: 'application/json',
         schema,
       },
-    }
+    },
+    rememberWorkingTextModel
   );
 
   const parsed = parseJsonSafe<{ recommendations: WardrobeGapItem[] }>(

@@ -20,7 +20,50 @@ function getClient(settings: ApiSettings): GoogleGenAI {
       'Укажи Gemini API ключ в настройках (иконка шестерёнки справа вверху).'
     );
   }
-  return new GoogleGenAI({ apiKey: key });
+  return new GoogleGenAI({ apiKey: key, apiVersion: 'v1beta' });
+}
+
+function isTransientCapacityError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes('503') ||
+    msg.includes('429') ||
+    msg.includes('UNAVAILABLE') ||
+    msg.includes('high demand') ||
+    msg.includes('overloaded') ||
+    msg.includes('capacity')
+  );
+}
+
+async function createInteractionWithFallback(
+  ai: GoogleGenAI,
+  models: string[],
+  params: Record<string, unknown>
+): Promise<{
+  output_text?: string | null;
+  output_image?: { data?: string | null; mime_type?: string | null } | null;
+}> {
+  const uniqueModels = Array.from(new Set(models.filter(Boolean)));
+  let lastErr: unknown;
+  for (const model of uniqueModels) {
+    try {
+      const res = await ai.interactions.create({
+        ...params,
+        model,
+        stream: false,
+      } as Parameters<GoogleGenAI['interactions']['create']>[0]);
+      return res as {
+        output_text?: string | null;
+        output_image?: { data?: string | null; mime_type?: string | null } | null;
+      };
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientCapacityError(err)) {
+        throw err;
+      }
+    }
+  }
+  throw lastErr;
 }
 
 function parseJsonSafe<T>(text: string | null | undefined): T {
@@ -90,26 +133,33 @@ export async function analyzeClothingPhoto(
     required: ['name', 'category', 'color', 'season', 'style', 'notes'],
   };
 
-  const interaction = await ai.interactions.create({
-    model: settings.textModel || 'gemini-4-hydrogen',
-    store: false,
-    input: [
-      {
-        type: 'text',
-        text: 'Ты — персональный стилист Vogue. Проанализируй эту вещь на фото и верни структурированную карточку для цифрового гардероба на русском языке.',
-      },
-      {
-        type: 'image',
-        mime_type: inline.mimeType,
-        data: inline.data,
-      },
+  const interaction = await createInteractionWithFallback(
+    ai,
+    [
+      settings.textModel || 'gemini-4-hydrogen',
+      'gemini-3.5-flash-lite',
+      'gemini-4-argon',
     ],
-    response_format: {
-      type: 'text',
-      mime_type: 'application/json',
-      schema,
-    },
-  });
+    {
+      store: false,
+      input: [
+        {
+          type: 'text',
+          text: 'Ты — персональный стилист Vogue. Проанализируй эту вещь на фото и верни структурированную карточку для цифрового гардероба на русском языке.',
+        },
+        {
+          type: 'image',
+          mime_type: inline.mimeType,
+          data: inline.data,
+        },
+      ],
+      response_format: {
+        type: 'text',
+        mime_type: 'application/json',
+        schema,
+      },
+    }
+  );
 
   const parsed = parseJsonSafe<AnalyzedClothingItem>(interaction.output_text);
   const validCategory = WARDROBE_CATEGORIES.includes(parsed.category)
@@ -255,16 +305,23 @@ ${JSON.stringify(wardrobeCatalog, null, 2)}
     }
   }
 
-  const interaction = await ai.interactions.create({
-    model: settings.textModel || 'gemini-4-hydrogen',
-    store: false,
-    input: inputParts,
-    response_format: {
-      type: 'text',
-      mime_type: 'application/json',
-      schema,
-    },
-  });
+  const interaction = await createInteractionWithFallback(
+    ai,
+    [
+      settings.textModel || 'gemini-4-hydrogen',
+      'gemini-3.5-flash-lite',
+      'gemini-4-argon',
+    ],
+    {
+      store: false,
+      input: inputParts,
+      response_format: {
+        type: 'text',
+        mime_type: 'application/json',
+        schema,
+      },
+    }
+  );
 
   const raw = parseJsonSafe<{
     title: string;
@@ -363,25 +420,42 @@ Scene & mood:
     })),
   ];
 
-  const interaction = await ai.interactions.create({
-    model: settings.imageModel || 'gemini-nano-banana-2.1',
-    store: false,
-    input: inputParts,
-    response_format: {
-      type: 'image',
-      aspect_ratio: '3:4',
-      image_size: '1K',
-    },
-  });
-
-  const outImg = interaction.output_image;
-  if (!outImg?.data) {
-    throw new Error(
-      'Модель не вернула изображение. Попробуй другое селфи или повтори через пару секунд.'
+  try {
+    const interaction = await createInteractionWithFallback(
+      ai,
+      [
+        settings.imageModel || 'gemini-nano-banana-2.1',
+        'gemini-3.1-flash-lite-image',
+        'gemini-3.1-flash-image',
+      ],
+      {
+        store: false,
+        input: inputParts,
+        response_format: {
+          type: 'image',
+          aspect_ratio: '3:4',
+          image_size: '1K',
+        },
+      }
     );
+
+    const outImg = interaction.output_image;
+    if (!outImg?.data) {
+      throw new Error(
+        'Модель не вернула изображение. Попробуй другое селфи или повтори через пару секунд.'
+      );
+    }
+    const mime = outImg.mime_type || 'image/png';
+    return `data:${mime};base64,${outImg.data}`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('429') || msg.includes('Free Tier') || msg.includes('limit: 0')) {
+      throw new Error(
+        'Генерация изображений в виртуальной примерочной недоступна на бесплатном тарифе (Free Tier, лимит 0) для текущего API-ключа. Включи Billing в Google AI Studio или вставь другой ключ в настройках (кнопка API вверху).'
+      );
+    }
+    throw err;
   }
-  const mime = outImg.mime_type || 'image/png';
-  return `data:${mime};base64,${outImg.data}`;
 }
 
 /**
@@ -442,22 +516,29 @@ export async function analyzeWardrobeGaps(params: {
     required: ['recommendations'],
   };
 
-  const interaction = await ai.interactions.create({
-    model: settings.textModel || 'gemini-4-hydrogen',
-    store: false,
-    input: `Ты — опытный капсульный стилист Vogue. Проанализируй текущий гардероб девушки и порекомендуй РОВНО 3 базовые вещи, которых сильнее всего не хватает для создания множества новых стильных образов.
+  const interaction = await createInteractionWithFallback(
+    ai,
+    [
+      settings.textModel || 'gemini-4-hydrogen',
+      'gemini-3.5-flash-lite',
+      'gemini-4-argon',
+    ],
+    {
+      store: false,
+      input: `Ты — опытный капсульный стилист Vogue. Проанализируй текущий гардероб девушки и порекомендуй РОВНО 3 базовые вещи, которых сильнее всего не хватает для создания множества новых стильных образов.
 
 Предпочитаемый стиль: ${profile.styleVibe}
 Текущий гардероб:
 ${JSON.stringify(catalog, null, 2)}
 
 Отвечай на русском языке, лаконично и вдохновляюще.`,
-    response_format: {
-      type: 'text',
-      mime_type: 'application/json',
-      schema,
-    },
-  });
+      response_format: {
+        type: 'text',
+        mime_type: 'application/json',
+        schema,
+      },
+    }
+  );
 
   const parsed = parseJsonSafe<{ recommendations: WardrobeGapItem[] }>(
     interaction.output_text

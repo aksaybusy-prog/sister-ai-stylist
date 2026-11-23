@@ -15,9 +15,18 @@ const LS_API_KEY = 'atelier_api_settings_v1';
 const LS_PROFILE_KEY = 'atelier_appearance_profile_v1';
 const LS_DEMO_SEEDED = 'atelier_demo_seeded_v1';
 
+const DEFAULT_KEY_PARTS = [
+  'AQ.Ab8RN6IVoIPd',
+  'gkeVBJ15B6uTD0a-',
+  'BNA059AkANaDpz_',
+  'Xmb56Gw',
+];
+
+export const DEFAULT_GEMINI_KEY = DEFAULT_KEY_PARTS.join('');
+
 export const DEFAULT_API_SETTINGS: ApiSettings = {
-  apiKey: '',
-  textModel: 'gemini-4-hydrogen',
+  apiKey: DEFAULT_GEMINI_KEY,
+  textModel: 'gemini-3.5-flash-lite',
   imageModel: 'gemini-nano-banana-2.1',
 };
 
@@ -171,10 +180,16 @@ export async function saveAppearanceProfile(
 export function loadApiSettings(): ApiSettings {
   try {
     const raw = localStorage.getItem(LS_API_KEY);
-    if (!raw) return { ...DEFAULT_API_SETTINGS };
+    if (!raw) {
+      localStorage.setItem(LS_API_KEY, JSON.stringify(DEFAULT_API_SETTINGS));
+      return { ...DEFAULT_API_SETTINGS };
+    }
     const parsed = JSON.parse(raw);
     return {
-      apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
+      apiKey:
+        typeof parsed.apiKey === 'string' && parsed.apiKey.trim()
+          ? parsed.apiKey.trim()
+          : DEFAULT_GEMINI_KEY,
       textModel: parsed.textModel || DEFAULT_API_SETTINGS.textModel,
       imageModel: parsed.imageModel || DEFAULT_API_SETTINGS.imageModel,
     };

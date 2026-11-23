@@ -45,7 +45,15 @@ function getClient(settings: ApiSettings): GoogleGenAI {
       'Укажи Gemini API ключ в настройках (иконка шестерёнки справа вверху).'
     );
   }
-  return new GoogleGenAI({ apiKey: key, apiVersion: 'v1beta' });
+  return new GoogleGenAI({
+    apiKey: key,
+    apiVersion: 'v1beta',
+    httpOptions: {
+      retryOptions: {
+        attempts: 1,
+      },
+    },
+  });
 }
 
 function isFallbackableError(err: unknown): boolean {

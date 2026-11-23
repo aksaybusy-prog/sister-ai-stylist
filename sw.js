@@ -1,4 +1,4 @@
-const CACHE_NAME = 'atelier-ai-v2';
+const CACHE_NAME = 'atelier-ai-v3';
 const APP_SHELL = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', (event) => {

@@ -9,9 +9,10 @@ interface SettingsModalProps {
 }
 
 const TEXT_MODELS = [
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (Рекомендуется · Быстрая)' },
+  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite (Рекомендуется · Макс. лимит)' },
   { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash (Сбалансированная)' },
   { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash (Резервная)' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (Стабильная)' },
   { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen (Продвинутый стиль)' },
 ];
 

@@ -13,6 +13,7 @@ import type {
 import { SEASONS, WARDROBE_CATEGORIES } from '../types';
 import { dataUrlToInlineImage } from './imageUtils';
 import {
+  clearWorkingTextModelIfMatches,
   getRememberedWorkingTextModel,
   rememberWorkingTextModel,
 } from './storage';
@@ -21,6 +22,7 @@ const SMART_TEXT_FALLBACK_ORDER = [
   'gemini-3.5-flash-lite',
   'gemini-3.8-flash',
   'gemini-3.6-flash',
+  'gemini-2.5-flash',
   'gemini-4-hydrogen',
 ];
 
@@ -57,7 +59,17 @@ function getClient(settings: ApiSettings): GoogleGenAI {
 }
 
 function isFallbackableError(err: unknown): boolean {
-  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const status = (err as { status?: number })?.status;
+  if (status === 429 || status === 503 || status === 404 || status === 500) {
+    return true;
+  }
+  const raw =
+    err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err !== null
+        ? JSON.stringify(err)
+        : String(err);
+  const msg = raw.toLowerCase();
   return (
     msg.includes('503') ||
     msg.includes('429') ||
@@ -66,11 +78,14 @@ function isFallbackableError(err: unknown): boolean {
     msg.includes('resource_exhausted') ||
     msg.includes('not_found') ||
     msg.includes('not found') ||
+    msg.includes('not supported') ||
     msg.includes('high demand') ||
     msg.includes('overloaded') ||
     msg.includes('capacity') ||
     msg.includes('rate limit') ||
-    msg.includes('quota')
+    msg.includes('quota') ||
+    msg.includes('exceeded') ||
+    msg.includes('per day')
   );
 }
 
@@ -99,6 +114,7 @@ async function createInteractionWithFallback(
       };
     } catch (err) {
       lastErr = err;
+      clearWorkingTextModelIfMatches(model);
       if (!isFallbackableError(err)) {
         throw err;
       }

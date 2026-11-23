@@ -13,6 +13,7 @@ const STORE_BLOBS = 'blobs';
 
 const LS_API_KEY = 'atelier_api_settings_v1';
 const LS_WORKING_TEXT_MODEL = 'atelier_working_text_model_v1';
+const LS_MODEL_MIGRATED_V2 = 'atelier_model_migrated_v2';
 const LS_PROFILE_KEY = 'atelier_appearance_profile_v1';
 const LS_DEMO_SEEDED = 'atelier_demo_seeded_v1';
 
@@ -192,8 +193,14 @@ export function loadApiSettings(): ApiSettings {
     const parsed = JSON.parse(raw);
     const savedTextModel =
       typeof parsed.textModel === 'string' ? parsed.textModel.trim() : '';
+    const migratedV2 = localStorage.getItem(LS_MODEL_MIGRATED_V2) === '1';
+    const shouldResetLegacyDefault =
+      !migratedV2 && savedTextModel === 'gemini-4-hydrogen';
+
     const sanitizedTextModel =
-      !savedTextModel || BLOCKED_TEXT_MODELS.has(savedTextModel)
+      !savedTextModel ||
+      BLOCKED_TEXT_MODELS.has(savedTextModel) ||
+      shouldResetLegacyDefault
         ? DEFAULT_API_SETTINGS.textModel
         : savedTextModel;
 
@@ -206,16 +213,23 @@ export function loadApiSettings(): ApiSettings {
       imageModel: parsed.imageModel || DEFAULT_API_SETTINGS.imageModel,
     };
 
-    if (savedTextModel !== sanitizedTextModel) {
-      localStorage.setItem(LS_API_KEY, JSON.stringify(normalized));
+    if (!migratedV2) {
+      localStorage.setItem(LS_MODEL_MIGRATED_V2, '1');
       try {
         const working = localStorage.getItem(LS_WORKING_TEXT_MODEL);
-        if (working && BLOCKED_TEXT_MODELS.has(working)) {
+        if (
+          working &&
+          (BLOCKED_TEXT_MODELS.has(working) || working === 'gemini-4-hydrogen')
+        ) {
           localStorage.removeItem(LS_WORKING_TEXT_MODEL);
         }
       } catch {
         // ignore
       }
+    }
+
+    if (savedTextModel !== sanitizedTextModel) {
+      localStorage.setItem(LS_API_KEY, JSON.stringify(normalized));
     }
 
     return normalized;
@@ -238,6 +252,16 @@ export function rememberWorkingTextModel(model: string): void {
   if (!model || BLOCKED_TEXT_MODELS.has(model)) return;
   try {
     localStorage.setItem(LS_WORKING_TEXT_MODEL, model);
+  } catch {
+    // ignore
+  }
+}
+
+export function clearWorkingTextModelIfMatches(model: string): void {
+  try {
+    if (localStorage.getItem(LS_WORKING_TEXT_MODEL) === model) {
+      localStorage.removeItem(LS_WORKING_TEXT_MODEL);
+    }
   } catch {
     // ignore
   }
